@@ -325,9 +325,10 @@ export class Accounts implements Module {
                 // TODO: there is a serious bug here. If two keys have the same password,
                 // then only one of them will be used for decryption.
                 if (isCorrectPassword) {
+                  const keyVersion = key.version || 3;
                   state.state.encryption.set(
                     key.id,
-                    new Encryption(possibleHash, key.id)
+                    new Encryption(possibleHash, key.id, keyVersion)
                   );
                   state.state.defaultEncryption = key.id;
 
@@ -343,6 +344,63 @@ export class Accounts implements Module {
                   root: true,
                 });
                 return;
+              }
+
+              // V3 to V4 dynamic migration triggering
+              let migrationToV4Needed = false;
+              let currentV3Key: Key | null = null;
+              for (const key of encKeys) {
+                if (saltedHash && (key.version === 3 || !key.version)) {
+                  migrationToV4Needed = true;
+                  currentV3Key = key;
+                  break;
+                }
+              }
+
+              if (migrationToV4Needed && currentV3Key) {
+                const newSaltHash = await genHash(password);
+                const newSalt = window.atob(newSaltHash.split("$")[4]);
+
+                const rawHash = await sendMessageToSandbox({
+                  action: "hash",
+                  value: password,
+                  salt: newSalt,
+                });
+                const v4PossibleHash = rawHash.split("$")[5];
+
+                const hashOfHash = await sendMessageToSandbox({
+                  action: "hash",
+                  value: v4PossibleHash,
+                  salt: newSalt,
+                });
+
+                const v4Key: Key = {
+                  dataType: DataType.Key,
+                  id: crypto.randomUUID(),
+                  salt: newSalt,
+                  hash: hashOfHash,
+                  version: 4,
+                };
+
+                const newEncryption = new Encryption(
+                  v4PossibleHash,
+                  v4Key.id,
+                  4
+                );
+                state.state.encryption.set(v4Key.id, newEncryption);
+                state.state.defaultEncryption = v4Key.id;
+
+                for (const entry of state.state.entries) {
+                  entry.changeEncryption(newEncryption);
+                }
+
+                await BrowserStorage.set({
+                  [v4Key.id]: v4Key,
+                });
+                await EntryStorage.set(state.state.entries);
+                await BrowserStorage.remove(currentV3Key.id);
+
+                await state.dispatch("updateEntries");
               }
             }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
