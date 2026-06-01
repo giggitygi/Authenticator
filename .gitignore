@@ -14,3 +14,6 @@ view/licenses.html
 ./test
 scripts/authenticator-build-key
 scripts/test-runner.js
+
+# Local code graph SQLite index (mcp-codegraph database cache)
+.codegraph/
