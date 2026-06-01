@@ -7,6 +7,7 @@ import { Encryption } from "./models/encryption";
 import { EntryStorage } from "./models/storage";
 import { getOTPAuthPerLineFromOPTAuthMigration } from "./models/migration";
 import * as CryptoJS from "crypto-js";
+import { sendMessageToSandbox } from "./models/password";
 
 async function init() {
   // i18n
@@ -143,29 +144,11 @@ async function findAndUnlockKey(
     return null;
   }
 
-  const rawHash = await new Promise((resolve: (value: string) => void) => {
-    const iframe = document.getElementById(
-      "argon-sandbox"
-    ) as HTMLIFrameElement;
-    const message = {
-      action: "hash",
-      value: password,
-      salt: key.salt,
-    };
-    if (iframe && iframe.contentWindow) {
-      const listener = (response: MessageEvent) => {
-        if (response.source !== iframe.contentWindow) {
-          return;
-        }
-        window.removeEventListener("message", listener);
-        resolve(response.data.response);
-      };
-      window.addEventListener("message", listener);
-      iframe.contentWindow.postMessage(message, "*");
-    } else {
-      resolve("");
-    }
-  });
+  const rawHash = await sendMessageToSandbox({
+    action: "hash",
+    value: password,
+    salt: key.salt,
+  }).catch(() => "");
 
   // https://passlib.readthedocs.io/en/stable/lib/passlib.hash.argon2.html#format-algorithm
   const possibleHash = rawHash.split("$")[5];
@@ -175,31 +158,11 @@ async function findAndUnlockKey(
 
   // verify user password by comparing their password hash with the
   // hash of their password's hash
-  const isCorrectPassword = await new Promise(
-    (resolve: (value: string) => void) => {
-      const iframe = document.getElementById(
-        "argon-sandbox"
-      ) as HTMLIFrameElement;
-      const message = {
-        action: "verify",
-        value: possibleHash,
-        hash: key.hash,
-      };
-      if (iframe && iframe.contentWindow) {
-        const listener = (response: MessageEvent) => {
-          if (response.source !== iframe.contentWindow) {
-            return;
-          }
-          window.removeEventListener("message", listener);
-          resolve(response.data.response);
-        };
-        window.addEventListener("message", listener);
-        iframe.contentWindow.postMessage(message, "*");
-      } else {
-        resolve("");
-      }
-    }
-  );
+  const isCorrectPassword = await sendMessageToSandbox({
+    action: "verify",
+    value: possibleHash,
+    hash: key.hash,
+  }).catch(() => "");
 
   if (!isCorrectPassword) {
     return null;
