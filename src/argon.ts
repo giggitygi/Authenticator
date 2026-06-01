@@ -4,7 +4,7 @@ window.addEventListener("message", (event) => {
   const message = event.data;
   const source = event.source as Window;
 
-  if (!source) {
+  if (!source || source !== window.parent) {
     return;
   }
 

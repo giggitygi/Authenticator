@@ -237,18 +237,26 @@ export class Accounts implements Module {
             const key = CryptoJS.AES.decrypt(encKeys.enc, password).toString();
             const isCorrectPassword = await new Promise(
               (resolve: (value: string) => void) => {
-                const iframe = document.getElementById("argon-sandbox");
+                const iframe = document.getElementById(
+                  "argon-sandbox"
+                ) as HTMLIFrameElement;
                 const message = {
                   action: "verify",
                   value: key,
                   hash: encKeys.hash,
                 };
-                if (iframe) {
-                  window.addEventListener("message", (response) => {
+                if (iframe && iframe.contentWindow) {
+                  const listener = (response: MessageEvent) => {
+                    if (response.source !== iframe.contentWindow) {
+                      return;
+                    }
+                    window.removeEventListener("message", listener);
                     resolve(response.data.response);
-                  });
-                  // @ts-expect-error - bad typings
+                  };
+                  window.addEventListener("message", listener);
                   iframe.contentWindow.postMessage(message, "*");
+                } else {
+                  resolve("");
                 }
               }
             );
@@ -291,18 +299,26 @@ export class Accounts implements Module {
             for (const key of encKeys) {
               const rawHash = await new Promise(
                 (resolve: (value: string) => void) => {
-                  const iframe = document.getElementById("argon-sandbox");
+                  const iframe = document.getElementById(
+                    "argon-sandbox"
+                  ) as HTMLIFrameElement;
                   const message = {
                     action: "hash",
                     value: password,
                     salt: key.salt,
                   };
-                  if (iframe) {
-                    window.addEventListener("message", (response) => {
+                  if (iframe && iframe.contentWindow) {
+                    const listener = (response: MessageEvent) => {
+                      if (response.source !== iframe.contentWindow) {
+                        return;
+                      }
+                      window.removeEventListener("message", listener);
                       resolve(response.data.response);
-                    });
-                    // @ts-expect-error bad typings
+                    };
+                    window.addEventListener("message", listener);
                     iframe.contentWindow.postMessage(message, "*");
+                  } else {
+                    resolve("");
                   }
                 }
               );
@@ -317,18 +333,26 @@ export class Accounts implements Module {
               // hash of their password's hash
               const isCorrectPassword = await new Promise(
                 (resolve: (value: string) => void) => {
-                  const iframe = document.getElementById("argon-sandbox");
+                  const iframe = document.getElementById(
+                    "argon-sandbox"
+                  ) as HTMLIFrameElement;
                   const message = {
                     action: "verify",
                     value: possibleHash,
                     hash: key.hash,
                   };
-                  if (iframe) {
-                    window.addEventListener("message", (response) => {
+                  if (iframe && iframe.contentWindow) {
+                    const listener = (response: MessageEvent) => {
+                      if (response.source !== iframe.contentWindow) {
+                        return;
+                      }
+                      window.removeEventListener("message", listener);
                       resolve(response.data.response);
-                    });
-                    // @ts-expect-error bad typings
+                    };
+                    window.addEventListener("message", listener);
                     iframe.contentWindow.postMessage(message, "*");
+                  } else {
+                    resolve("");
                   }
                 }
               );
@@ -705,9 +729,14 @@ async function genHash(value: string) {
       salt,
     };
     if (iframe) {
-      window.addEventListener("message", (response) => {
+      const listener = (response: MessageEvent) => {
+        if (response.source !== (iframe as HTMLIFrameElement).contentWindow) {
+          return;
+        }
+        window.removeEventListener("message", listener);
         resolve(response.data.response);
-      });
+      };
+      window.addEventListener("message", listener);
       // @ts-expect-error bad typings
       iframe.contentWindow.postMessage(message, "*");
     }

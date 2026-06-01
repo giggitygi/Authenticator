@@ -15,12 +15,18 @@ export async function argonHash(
     throw new Error("argon-sandbox missing!");
   }
 
+  const htmlIframe = iframe as HTMLIFrameElement;
   const argonPromise: Promise<string | undefined> = new Promise((resolve) => {
-    window.addEventListener("message", (response) => {
+    const listener = (response: MessageEvent) => {
+      if (response.source !== htmlIframe.contentWindow) {
+        return;
+      }
+      window.removeEventListener("message", listener);
       resolve(response.data.response);
-    });
+    };
+    window.addEventListener("message", listener);
     // @ts-expect-error bad typings
-    iframe.contentWindow.postMessage(message, "*");
+    htmlIframe.contentWindow.postMessage(message, "*");
   });
 
   return argonPromise;
@@ -41,12 +47,18 @@ export async function argonVerify(
     throw new Error("argon-sandbox missing!");
   }
 
+  const htmlIframe = iframe as HTMLIFrameElement;
   const argonPromise: Promise<boolean> = new Promise((resolve) => {
-    window.addEventListener("message", (response) => {
+    const listener = (response: MessageEvent) => {
+      if (response.source !== htmlIframe.contentWindow) {
+        return;
+      }
+      window.removeEventListener("message", listener);
       resolve(response.data.response);
-    });
+    };
+    window.addEventListener("message", listener);
     // @ts-expect-error bad typings
-    iframe.contentWindow.postMessage(message, "*");
+    htmlIframe.contentWindow.postMessage(message, "*");
   });
 
   return argonPromise;
