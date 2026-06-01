@@ -1,5 +1,6 @@
 import { EntryStorage, BrowserStorage, isOldKey } from "../models/storage";
 import { Encryption } from "../models/encryption";
+import { sendMessageToSandbox } from "../models/password";
 import * as CryptoJS from "crypto-js";
 import { OTPType, OTPAlgorithm } from "../models/otp";
 import { ActionContext } from "vuex";
@@ -230,107 +231,15 @@ export class Accounts implements Module {
           // Decrypt entries
           let saltedHash = "";
           let migrationNeeded = false;
-          const encKeys = await BrowserStorage.getKeys();
-          if (isOldKey(encKeys)) {
-            // --- handle v2 encryption
-            // decrypt using key
-            const key = CryptoJS.AES.decrypt(encKeys.enc, password).toString();
-            const isCorrectPassword = await new Promise(
-              (resolve: (value: string) => void) => {
-                const iframe = document.getElementById(
-                  "argon-sandbox"
-                ) as HTMLIFrameElement;
-                const message = {
-                  action: "verify",
-                  value: key,
-                  hash: encKeys.hash,
-                };
-                if (iframe && iframe.contentWindow) {
-                  const listener = (response: MessageEvent) => {
-                    if (response.source !== iframe.contentWindow) {
-                      return;
-                    }
-                    window.removeEventListener("message", listener);
-                    resolve(response.data.response);
-                  };
-                  window.addEventListener("message", listener);
-                  iframe.contentWindow.postMessage(message, "*");
-                } else {
-                  resolve("");
-                }
-              }
-            );
-
-            if (!isCorrectPassword) {
-              state.commit("wrongPassword");
-              state.commit("currentView/changeView", "EnterPasswordPage", {
-                root: true,
-              });
-              return;
-            }
-
-            state.state.encryption.set(
-              LegacyEncryption,
-              new Encryption(key, LegacyEncryption)
-            );
-
-            migrationNeeded = true;
-          } else if (encKeys.length === 0) {
-            // --- handle v1 encryption
-            // verify current password
-            state.state.encryption.set(
-              LegacyEncryption,
-              new Encryption(password, LegacyEncryption)
-            );
-            await state.dispatch("updateEntries");
-
-            if (state.getters.currentlyEncrypted) {
-              state.commit("wrongPassword");
-              state.commit("currentView/changeView", "EnterPasswordPage", {
-                root: true,
-              });
-              return;
-            }
-
-            migrationNeeded = true;
-          } else {
-            // --- handle v3 encryption
-            // TODO: let user reconcile multiple keys from sync conflicts
-            for (const key of encKeys) {
-              const rawHash = await new Promise(
-                (resolve: (value: string) => void) => {
-                  const iframe = document.getElementById(
-                    "argon-sandbox"
-                  ) as HTMLIFrameElement;
-                  const message = {
-                    action: "hash",
-                    value: password,
-                    salt: key.salt,
-                  };
-                  if (iframe && iframe.contentWindow) {
-                    const listener = (response: MessageEvent) => {
-                      if (response.source !== iframe.contentWindow) {
-                        return;
-                      }
-                      window.removeEventListener("message", listener);
-                      resolve(response.data.response);
-                    };
-                    window.addEventListener("message", listener);
-                    iframe.contentWindow.postMessage(message, "*");
-                  } else {
-                    resolve("");
-                  }
-                }
-              );
-
-              // https://passlib.readthedocs.io/en/stable/lib/passlib.hash.argon2.html#format-algorithm
-              const possibleHash = rawHash.split("$")[5];
-              if (!possibleHash) {
-                throw new Error("argon2 did not return a hash!");
-              }
-
-              // verify user password by comparing their password hash with the
-              // hash of their password's hash
+          try {
+            const encKeys = await BrowserStorage.getKeys();
+            if (isOldKey(encKeys)) {
+              // --- handle v2 encryption
+              // decrypt using key
+              const key = CryptoJS.AES.decrypt(
+                encKeys.enc,
+                password
+              ).toString();
               const isCorrectPassword = await new Promise(
                 (resolve: (value: string) => void) => {
                   const iframe = document.getElementById(
@@ -338,8 +247,8 @@ export class Accounts implements Module {
                   ) as HTMLIFrameElement;
                   const message = {
                     action: "verify",
-                    value: possibleHash,
-                    hash: key.hash,
+                    value: key,
+                    hash: encKeys.hash,
                   };
                   if (iframe && iframe.contentWindow) {
                     const listener = (response: MessageEvent) => {
@@ -357,28 +266,97 @@ export class Accounts implements Module {
                 }
               );
 
-              // TODO: there is a serious bug here. If two keys have the same password,
-              // then only one of them will be used for decryption.
-              if (isCorrectPassword) {
-                state.state.encryption.set(
-                  key.id,
-                  new Encryption(possibleHash, key.id)
-                );
-                state.state.defaultEncryption = key.id;
+              if (!isCorrectPassword) {
+                state.commit("wrongPassword");
+                state.commit("currentView/changeView", "EnterPasswordPage", {
+                  root: true,
+                });
+                return;
+              }
 
-                saltedHash = possibleHash;
+              state.state.encryption.set(
+                LegacyEncryption,
+                new Encryption(key, LegacyEncryption)
+              );
+
+              migrationNeeded = true;
+            } else if (encKeys.length === 0) {
+              // --- handle v1 encryption
+              // verify current password
+              state.state.encryption.set(
+                LegacyEncryption,
+                new Encryption(password, LegacyEncryption)
+              );
+              await state.dispatch("updateEntries");
+
+              if (state.getters.currentlyEncrypted) {
+                state.commit("wrongPassword");
+                state.commit("currentView/changeView", "EnterPasswordPage", {
+                  root: true,
+                });
+                return;
+              }
+
+              migrationNeeded = true;
+            } else {
+              // --- handle v3 encryption
+              // TODO: let user reconcile multiple keys from sync conflicts
+              for (const key of encKeys) {
+                const rawHash = await sendMessageToSandbox({
+                  action: "hash",
+                  value: password,
+                  salt: key.salt,
+                });
+
+                // https://passlib.readthedocs.io/en/stable/lib/passlib.hash.argon2.html#format-algorithm
+                const possibleHash = rawHash.split("$")[5];
+                if (!possibleHash) {
+                  throw new Error("argon2 did not return a hash!");
+                }
+
+                // verify user password by comparing their password hash with the
+                // hash of their password's hash
+                const isCorrectPassword = await sendMessageToSandbox({
+                  action: "verify",
+                  value: possibleHash,
+                  hash: key.hash,
+                });
+
+                // TODO: there is a serious bug here. If two keys have the same password,
+                // then only one of them will be used for decryption.
+                if (isCorrectPassword) {
+                  state.state.encryption.set(
+                    key.id,
+                    new Encryption(possibleHash, key.id)
+                  );
+                  state.state.defaultEncryption = key.id;
+
+                  saltedHash = possibleHash;
+                }
+              }
+
+              await state.dispatch("updateEntries");
+
+              if (!saltedHash) {
+                state.commit("wrongPassword");
+                state.commit("currentView/changeView", "EnterPasswordPage", {
+                  root: true,
+                });
+                return;
               }
             }
-
-            await state.dispatch("updateEntries");
-
-            if (!saltedHash) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } catch (error: any) {
+            if (error?.message === "Sandbox timeout") {
               state.commit("wrongPassword");
-              state.commit("currentView/changeView", "EnterPasswordPage", {
-                root: true,
-              });
+              state.commit(
+                "notification/alert",
+                "密码验证超时，请重试 (Argon2 Sandbox Timeout)",
+                { root: true }
+              );
               return;
             }
+            throw error;
           }
 
           // Migrate from older encryption if needed
@@ -715,30 +693,13 @@ export class Accounts implements Module {
 }
 
 async function genHash(value: string) {
-  const randomValues = window.crypto.getRandomValues(new Uint16Array(8));
-  let salt = "";
-  for (const byte of randomValues) {
-    salt += byte.toString(16);
-  }
-
-  return new Promise((resolve: (value: string) => void) => {
-    const iframe = document.getElementById("argon-sandbox");
-    const message = {
-      action: "hash",
-      value: value,
-      salt,
-    };
-    if (iframe) {
-      const listener = (response: MessageEvent) => {
-        if (response.source !== (iframe as HTMLIFrameElement).contentWindow) {
-          return;
-        }
-        window.removeEventListener("message", listener);
-        resolve(response.data.response);
-      };
-      window.addEventListener("message", listener);
-      // @ts-expect-error bad typings
-      iframe.contentWindow.postMessage(message, "*");
-    }
-  });
+  const salt = window.crypto.subtle
+    ? window.crypto.randomUUID().replace(/-/g, "")
+    : Math.random().toString(36).substring(2, 15);
+  const message = {
+    action: "hash",
+    value,
+    salt,
+  };
+  return sendMessageToSandbox(message);
 }
