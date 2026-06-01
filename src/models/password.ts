@@ -1,67 +1,64 @@
 import { BrowserStorage, isOldKey } from "./storage";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function sendMessageToSandbox(
+  message: any,
+  timeoutMs = 10000
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const iframe = document.getElementById(
+      "argon-sandbox"
+    ) as HTMLIFrameElement;
+    if (!iframe || !iframe.contentWindow) {
+      return reject(new Error("argon-sandbox missing!"));
+    }
+
+    let timer = 0;
+
+    const listener = (response: MessageEvent) => {
+      if (response.source !== iframe.contentWindow) {
+        return;
+      }
+      if (timer) {
+        clearTimeout(timer);
+      }
+      window.removeEventListener("message", listener);
+      resolve(response.data.response);
+    };
+
+    timer = window.setTimeout(() => {
+      window.removeEventListener("message", listener);
+      reject(new Error("Sandbox timeout"));
+    }, timeoutMs);
+
+    window.addEventListener("message", listener);
+    iframe.contentWindow.postMessage(message, "*");
+  });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 export async function argonHash(
   value: string,
   salt: string
 ): Promise<string | undefined> {
-  const iframe = document.getElementById("argon-sandbox");
   const message = {
     action: "hash",
     value,
     salt,
   };
-
-  if (!iframe) {
-    throw new Error("argon-sandbox missing!");
-  }
-
-  const htmlIframe = iframe as HTMLIFrameElement;
-  const argonPromise: Promise<string | undefined> = new Promise((resolve) => {
-    const listener = (response: MessageEvent) => {
-      if (response.source !== htmlIframe.contentWindow) {
-        return;
-      }
-      window.removeEventListener("message", listener);
-      resolve(response.data.response);
-    };
-    window.addEventListener("message", listener);
-    // @ts-expect-error bad typings
-    htmlIframe.contentWindow.postMessage(message, "*");
-  });
-
-  return argonPromise;
+  return sendMessageToSandbox(message);
 }
 
 export async function argonVerify(
   value: string,
   hash: string
 ): Promise<boolean> {
-  const iframe = document.getElementById("argon-sandbox");
   const message = {
     action: "verify",
     value,
     hash,
   };
-
-  if (!iframe) {
-    throw new Error("argon-sandbox missing!");
-  }
-
-  const htmlIframe = iframe as HTMLIFrameElement;
-  const argonPromise: Promise<boolean> = new Promise((resolve) => {
-    const listener = (response: MessageEvent) => {
-      if (response.source !== htmlIframe.contentWindow) {
-        return;
-      }
-      window.removeEventListener("message", listener);
-      resolve(response.data.response);
-    };
-    window.addEventListener("message", listener);
-    // @ts-expect-error bad typings
-    htmlIframe.contentWindow.postMessage(message, "*");
-  });
-
-  return argonPromise;
+  return sendMessageToSandbox(message);
 }
 
 // Verify a password using keys in BrowserStorage
