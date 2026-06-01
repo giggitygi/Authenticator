@@ -72,5 +72,5 @@ interface Key {
   salt: string;
   // Hash of the encryption key
   hash: string;
-  version: 3;
+  version: 3 | 4;
 }
